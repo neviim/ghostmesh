@@ -1,6 +1,6 @@
-use crdts::{GSet, CmRDT, CvRDT};
+use crdts::{GSet, CvRDT};
 use libp2p::{
-    gossipsub, mdns, noise, ping, swarm::NetworkBehaviour, swarm::SwarmEvent, tcp, yamux, Multiaddr, PeerId, Swarm,
+    gossipsub, mdns, noise, ping, swarm::NetworkBehaviour, swarm::SwarmEvent, tcp, yamux, PeerId, Swarm,
 };
 use libp2p::futures::StreamExt;
 use std::collections::hash_map::DefaultHasher;
