@@ -1,5 +1,5 @@
 use libp2p::{
-    gossipsub, mdns, noise, swarm::NetworkBehaviour, swarm::SwarmEvent, tcp, yamux, Multiaddr, PeerId, Swarm,
+    gossipsub, mdns, noise, ping, swarm::NetworkBehaviour, swarm::SwarmEvent, tcp, yamux, Multiaddr, PeerId, Swarm,
 };
 use libp2p::futures::StreamExt;
 use std::collections::hash_map::DefaultHasher;
@@ -14,10 +14,13 @@ use anyhow::Result;
 pub struct MyBehaviour {
     pub gossipsub: gossipsub::Behaviour,
     pub mdns: mdns::tokio::Behaviour,
+    pub ping: ping::Behaviour,
 }
 
-pub async fn run_node(port: u16) -> Result<()> {
-    let mut swarm = create_swarm(port).await?;
+
+
+pub async fn run_node(port: u16, id_keys: libp2p::identity::Keypair) -> Result<()> {
+    let mut swarm = create_swarm(port, id_keys).await?;
 
     // Subscribe to a topic
     let topic = gossipsub::IdentTopic::new("ghostmesh-global");
@@ -67,6 +70,18 @@ pub async fn run_node(port: u16) -> Result<()> {
                         swarm.behaviour_mut().gossipsub.remove_explicit_peer(&peer_id);
                     }
                 }
+                SwarmEvent::ConnectionEstablished { peer_id, .. } => {
+                    info!("Connection established with peer: {peer_id}");
+                }
+                SwarmEvent::ConnectionClosed { peer_id, cause, .. } => {
+                    info!("Connection closed with peer: {peer_id}. Cause: {cause:?}");
+                }
+                SwarmEvent::OutgoingConnectionError { peer_id, error, .. } => {
+                    info!("Outgoing connection error with peer {:?}: {error:?}", peer_id);
+                }
+                SwarmEvent::IncomingConnectionError { error, .. } => {
+                    info!("Incoming connection error: {error:?}");
+                }
                 SwarmEvent::Behaviour(MyBehaviourEvent::Gossipsub(gossipsub::Event::Message {
                     propagation_source: peer_id,
                     message_id: _id,
@@ -84,8 +99,7 @@ pub async fn run_node(port: u16) -> Result<()> {
     }
 }
 
-async fn create_swarm(port: u16) -> Result<Swarm<MyBehaviour>> {
-    let id_keys = libp2p::identity::Keypair::generate_ed25519();
+async fn create_swarm(port: u16, id_keys: libp2p::identity::Keypair) -> Result<Swarm<MyBehaviour>> {
     let peer_id = PeerId::from(id_keys.public());
     info!("Local Peer ID: {peer_id}");
 
@@ -96,7 +110,7 @@ async fn create_swarm(port: u16) -> Result<Swarm<MyBehaviour>> {
             noise::Config::new,
             yamux::Config::default,
         )?
-        .with_quic()
+
         .with_behaviour(|key| {
             // Gossipsub configuration
             let message_id_fn = |message: &gossipsub::Message| {
@@ -118,13 +132,15 @@ async fn create_swarm(port: u16) -> Result<Swarm<MyBehaviour>> {
             )?;
 
             let mdns = mdns::tokio::Behaviour::new(mdns::Config::default(), key.public().to_peer_id())?;
+            
+            let ping = ping::Behaviour::new(ping::Config::new());
 
-            Ok(MyBehaviour { gossipsub, mdns })
+            Ok(MyBehaviour { gossipsub, mdns, ping })
         })?
         .build();
 
     // Listen on all interfaces and the specified port
-    swarm.listen_on(format!("/ip4/0.0.0.0/udp/{}/quic-v1", port).parse()?)?;
+
     swarm.listen_on(format!("/ip4/0.0.0.0/tcp/{}", port).parse()?)?;
 
     Ok(swarm)

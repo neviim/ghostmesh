@@ -2,6 +2,10 @@ mod p2p;
 
 use clap::Parser;
 use tracing_subscriber::EnvFilter;
+use libp2p::identity::Keypair;
+use std::fs;
+use std::path::Path;
+use tracing::info;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -18,6 +22,24 @@ async fn main() -> anyhow::Result<()> {
         .init();
 
     let args = Args::parse();
+    let identity_file = format!("identity_{}.key", args.port);
+    let id_keys = load_or_generate_keypair(&identity_file)?;
 
-    p2p::run_node(args.port).await
+    p2p::run_node(args.port, id_keys).await
+}
+
+fn load_or_generate_keypair(path: &str) -> anyhow::Result<Keypair> {
+    let path = Path::new(path);
+    if path.exists() {
+        info!("Loading identity from {:?}", path);
+        let bytes = fs::read(path)?;
+        let keypair = Keypair::from_protobuf_encoding(&bytes)?;
+        Ok(keypair)
+    } else {
+        info!("Generating new identity and saving to {:?}", path);
+        let keypair = Keypair::generate_ed25519();
+        let bytes = keypair.to_protobuf_encoding()?;
+        fs::write(path, bytes)?;
+        Ok(keypair)
+    }
 }
