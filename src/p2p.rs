@@ -1,3 +1,4 @@
+use crdts::{GSet, CmRDT, CvRDT};
 use libp2p::{
     gossipsub, mdns, noise, ping, swarm::NetworkBehaviour, swarm::SwarmEvent, tcp, yamux, Multiaddr, PeerId, Swarm,
 };
@@ -17,14 +18,18 @@ pub struct MyBehaviour {
     pub ping: ping::Behaviour,
 }
 
-
-
 pub async fn run_node(port: u16, id_keys: libp2p::identity::Keypair) -> Result<()> {
     let mut swarm = create_swarm(port, id_keys).await?;
 
-    // Subscribe to a topic
-    let topic = gossipsub::IdentTopic::new("ghostmesh-global");
-    swarm.behaviour_mut().gossipsub.subscribe(&topic)?;
+    // Subscribe to topics
+    let topic_global = gossipsub::IdentTopic::new("ghostmesh-global");
+    let topic_crdt = gossipsub::IdentTopic::new("ghostmesh-crdt");
+    
+    swarm.behaviour_mut().gossipsub.subscribe(&topic_global)?;
+    swarm.behaviour_mut().gossipsub.subscribe(&topic_crdt)?;
+
+    // Initialize CRDT state
+    let mut shared_state: GSet<String> = GSet::new();
 
     // Read from stdin
     let mut stdin = io::BufReader::new(io::stdin()).lines();
@@ -42,10 +47,28 @@ pub async fn run_node(port: u16, id_keys: libp2p::identity::Keypair) -> Result<(
                                 let peers: Vec<_> = swarm.connected_peers().collect();
                                 info!("Connected Peers: {} - {:?}", peers.len(), peers);
                             }
-                            _ => info!("Unknown command. Try /peers"),
+                            "/log" => {
+                                if parts.len() > 1 {
+                                    let msg = parts[1..].join(" ");
+                                    shared_state.insert(msg.clone());
+                                    info!("Logged: {}", msg);
+                                    
+                                    // Broadcast new state
+                                    let state_bytes = serde_json::to_vec(&shared_state)?;
+                                    if let Err(e) = swarm.behaviour_mut().gossipsub.publish(topic_crdt.clone(), state_bytes) {
+                                        error!("Publish error: {:?}", e);
+                                    }
+                                } else {
+                                    info!("Usage: /log <message>");
+                                }
+                            }
+                            "/show" => {
+                                info!("Current Log: {:?}", shared_state.read());
+                            }
+                            _ => info!("Unknown command. Try /peers, /log, or /show"),
                         }
                     } else {
-                        if let Err(e) = swarm.behaviour_mut().gossipsub.publish(topic.clone(), line.as_bytes()) {
+                        if let Err(e) = swarm.behaviour_mut().gossipsub.publish(topic_global.clone(), line.as_bytes()) {
                             error!("Publish error: {:?}", e);
                         }
                     }
@@ -87,11 +110,21 @@ pub async fn run_node(port: u16, id_keys: libp2p::identity::Keypair) -> Result<(
                     message_id: _id,
                     message,
                 })) => {
-                    info!(
-                        "Got message: '{}' from peer: {:?}",
-                        String::from_utf8_lossy(&message.data),
-                        peer_id
-                    );
+                    if message.topic == topic_crdt.hash() {
+                        match serde_json::from_slice::<GSet<String>>(&message.data) {
+                            Ok(remote_state) => {
+                                shared_state.merge(remote_state);
+                                info!("Synced CRDT state. Current Log: {:?}", shared_state.read());
+                            }
+                            Err(e) => error!("Failed to deserialize CRDT state: {:?}", e),
+                        }
+                    } else {
+                        info!(
+                            "Got message: '{}' from peer: {:?}",
+                            String::from_utf8_lossy(&message.data),
+                            peer_id
+                        );
+                    }
                 }
                 _ => {}
             }
