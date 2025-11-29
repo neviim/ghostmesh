@@ -9,6 +9,9 @@ use std::time::Duration;
 use tokio::io::{self, AsyncBufReadExt};
 use tracing::{info, error};
 use anyhow::Result;
+use crate::state::AppState;
+use crate::http;
+use tokio::sync::mpsc;
 
 // We create a custom network behaviour that combines Gossipsub and Mdns.
 #[derive(NetworkBehaviour)]
@@ -28,16 +31,39 @@ pub async fn run_node(port: u16, id_keys: libp2p::identity::Keypair) -> Result<(
     swarm.behaviour_mut().gossipsub.subscribe(&topic_global)?;
     swarm.behaviour_mut().gossipsub.subscribe(&topic_crdt)?;
 
-    // Initialize CRDT state
-    let mut shared_state: GSet<String> = GSet::new();
+    // Initialize App State
+    let app_state = AppState::new();
+
+    // Channel for Web -> P2P communication
+    let (log_tx, mut log_rx) = mpsc::unbounded_channel();
+
+    // Spawn Web Server
+    let web_state = app_state.clone();
+    let web_tx = log_tx.clone();
+    let web_port = port + 1;
+    tokio::spawn(async move {
+        http::start_server(web_port, web_state, web_tx).await;
+    });
 
     // Read from stdin
     let mut stdin = io::BufReader::new(io::stdin()).lines();
 
-    info!("GhostMesh Node Started on port {}. Type messages to broadcast.", port);
+    info!("GhostMesh Node Started on port {}. Web Dashboard: http://localhost:{}", port, web_port);
 
     loop {
         tokio::select! {
+            // Handle Web Input (Log)
+            Some(msg) = log_rx.recv() => {
+                app_state.log.write().unwrap().insert(msg.clone());
+                info!("Web Logged: {}", msg);
+                
+                // Broadcast new state
+                let state_bytes = serde_json::to_vec(&*app_state.log.read().unwrap())?;
+                if let Err(e) = swarm.behaviour_mut().gossipsub.publish(topic_crdt.clone(), state_bytes) {
+                    error!("Publish error: {:?}", e);
+                }
+            }
+            // Handle Stdin Input
             line = stdin.next_line() => {
                 if let Ok(Some(line)) = line {
                     if line.starts_with("/") {
@@ -50,11 +76,11 @@ pub async fn run_node(port: u16, id_keys: libp2p::identity::Keypair) -> Result<(
                             "/log" => {
                                 if parts.len() > 1 {
                                     let msg = parts[1..].join(" ");
-                                    shared_state.insert(msg.clone());
+                                    app_state.log.write().unwrap().insert(msg.clone());
                                     info!("Logged: {}", msg);
                                     
                                     // Broadcast new state
-                                    let state_bytes = serde_json::to_vec(&shared_state)?;
+                                    let state_bytes = serde_json::to_vec(&*app_state.log.read().unwrap())?;
                                     if let Err(e) = swarm.behaviour_mut().gossipsub.publish(topic_crdt.clone(), state_bytes) {
                                         error!("Publish error: {:?}", e);
                                     }
@@ -63,7 +89,7 @@ pub async fn run_node(port: u16, id_keys: libp2p::identity::Keypair) -> Result<(
                                 }
                             }
                             "/show" => {
-                                info!("Current Log: {:?}", shared_state.read());
+                                info!("Current Log: {:?}", app_state.log.read().unwrap().read());
                             }
                             _ => info!("Unknown command. Try /peers, /log, or /show"),
                         }
@@ -95,12 +121,17 @@ pub async fn run_node(port: u16, id_keys: libp2p::identity::Keypair) -> Result<(
                 }
                 SwarmEvent::ConnectionEstablished { peer_id, .. } => {
                     info!("Connection established with peer: {peer_id}");
+                    app_state.peers.write().unwrap().insert(peer_id);
                 }
                 SwarmEvent::ConnectionClosed { peer_id, cause, .. } => {
                     info!("Connection closed with peer: {peer_id}. Cause: {cause:?}");
+                    app_state.peers.write().unwrap().remove(&peer_id);
                 }
                 SwarmEvent::OutgoingConnectionError { peer_id, error, .. } => {
                     info!("Outgoing connection error with peer {:?}: {error:?}", peer_id);
+                    if let Some(peer_id) = peer_id {
+                        app_state.peers.write().unwrap().remove(&peer_id);
+                    }
                 }
                 SwarmEvent::IncomingConnectionError { error, .. } => {
                     info!("Incoming connection error: {error:?}");
@@ -113,8 +144,8 @@ pub async fn run_node(port: u16, id_keys: libp2p::identity::Keypair) -> Result<(
                     if message.topic == topic_crdt.hash() {
                         match serde_json::from_slice::<GSet<String>>(&message.data) {
                             Ok(remote_state) => {
-                                shared_state.merge(remote_state);
-                                info!("Synced CRDT state. Current Log: {:?}", shared_state.read());
+                                app_state.log.write().unwrap().merge(remote_state);
+                                info!("Synced CRDT state. Current Log: {:?}", app_state.log.read().unwrap().read());
                             }
                             Err(e) => error!("Failed to deserialize CRDT state: {:?}", e),
                         }
