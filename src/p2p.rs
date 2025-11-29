@@ -4,6 +4,7 @@ use libp2p::{
 };
 use libp2p::futures::StreamExt;
 use std::collections::hash_map::DefaultHasher;
+use std::collections::HashSet;
 use std::hash::{Hash, Hasher};
 use std::time::Duration;
 use tokio::io::{self, AsyncBufReadExt};
@@ -33,6 +34,9 @@ pub async fn run_node(port: u16, id_keys: libp2p::identity::Keypair) -> Result<(
 
     // Initialize App State
     let app_state = AppState::new();
+
+    // Track pending dials to prevent storms
+    let mut pending_dials: HashSet<PeerId> = HashSet::new();
 
     // Channel for Web -> P2P communication
     let (log_tx, mut log_rx) = mpsc::unbounded_channel();
@@ -106,10 +110,16 @@ pub async fn run_node(port: u16, id_keys: libp2p::identity::Keypair) -> Result<(
                 }
                 SwarmEvent::Behaviour(MyBehaviourEvent::Mdns(mdns::Event::Discovered(list))) => {
                     for (peer_id, multiaddr) in list {
-                        info!("mDNS discovered a new peer: {peer_id}");
                         swarm.behaviour_mut().gossipsub.add_explicit_peer(&peer_id);
-                        if let Err(e) = swarm.dial(multiaddr) {
-                            error!("Dial error: {:?}", e);
+                        
+                        // Only dial if not already connected and not currently dialing
+                        if !swarm.is_connected(&peer_id) && !pending_dials.contains(&peer_id) {
+                             info!("mDNS discovered new peer: {peer_id}. Dialing {multiaddr}...");
+                             if let Err(e) = swarm.dial(multiaddr) {
+                                error!("Dial error: {:?}", e);
+                             } else {
+                                pending_dials.insert(peer_id);
+                             }
                         }
                     }
                 }
@@ -122,15 +132,18 @@ pub async fn run_node(port: u16, id_keys: libp2p::identity::Keypair) -> Result<(
                 SwarmEvent::ConnectionEstablished { peer_id, .. } => {
                     info!("Connection established with peer: {peer_id}");
                     app_state.peers.write().unwrap().insert(peer_id);
+                    pending_dials.remove(&peer_id);
                 }
                 SwarmEvent::ConnectionClosed { peer_id, cause, .. } => {
                     info!("Connection closed with peer: {peer_id}. Cause: {cause:?}");
                     app_state.peers.write().unwrap().remove(&peer_id);
+                    pending_dials.remove(&peer_id);
                 }
                 SwarmEvent::OutgoingConnectionError { peer_id, error, .. } => {
                     info!("Outgoing connection error with peer {:?}: {error:?}", peer_id);
                     if let Some(peer_id) = peer_id {
                         app_state.peers.write().unwrap().remove(&peer_id);
+                        pending_dials.remove(&peer_id);
                     }
                 }
                 SwarmEvent::IncomingConnectionError { error, .. } => {
@@ -197,7 +210,7 @@ async fn create_swarm(port: u16, id_keys: libp2p::identity::Keypair) -> Result<S
 
             let mdns = mdns::tokio::Behaviour::new(mdns::Config::default(), key.public().to_peer_id())?;
             
-            let ping = ping::Behaviour::new(ping::Config::new());
+            let ping = ping::Behaviour::new(ping::Config::new().with_interval(Duration::from_secs(60)).with_timeout(Duration::from_secs(30)));
 
             Ok(MyBehaviour { gossipsub, mdns, ping })
         })?
