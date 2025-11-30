@@ -1,6 +1,7 @@
 mod p2p;
 mod state;
 mod http;
+mod ble;
 
 use clap::Parser;
 use tracing_subscriber::EnvFilter;

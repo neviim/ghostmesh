@@ -12,6 +12,7 @@ use tracing::{info, error};
 use anyhow::Result;
 use crate::state::AppState;
 use crate::http;
+use crate::ble;
 use tokio::sync::mpsc;
 
 // We create a custom network behaviour that combines Gossipsub and Mdns.
@@ -47,6 +48,13 @@ pub async fn run_node(port: u16, id_keys: libp2p::identity::Keypair) -> Result<(
     let web_port = port + 1;
     tokio::spawn(async move {
         http::start_server(web_port, web_state, web_tx).await;
+    });
+
+    // Spawn BLE Service
+    tokio::spawn(async move {
+        if let Err(e) = ble::run_ble_service().await {
+            error!("BLE Service error: {:?}", e);
+        }
     });
 
     // Read from stdin
