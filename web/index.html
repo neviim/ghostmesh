@@ -224,7 +224,12 @@
 <body>
     <div class="container">
         <header>
-            <h1>GhostMesh Node</h1>
+            <div>
+                <h1>GhostMesh Node</h1>
+                <div id="local-peer-id"
+                    style="font-size: 0.8rem; color: var(--text-secondary); margin-top: 0.25rem; font-family: monospace;">
+                    Loading ID...</div>
+            </div>
             <div class="status-badge">
                 <div class="status-dot"></div>
                 <span id="peer-count">0 Peers Connected</span>
@@ -313,6 +318,11 @@
             try {
                 const response = await fetch('/api/state');
                 const data = await response.json();
+
+                // Update Local Peer ID
+                if (data.local_peer_id) {
+                    document.getElementById('local-peer-id').innerText = `ID: ${data.local_peer_id}`;
+                }
 
                 // Update Peer Count
                 document.getElementById('peer-count').innerText = `${data.peers.length} Peers Connected`;

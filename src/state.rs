@@ -16,6 +16,7 @@ pub struct AppStateSnapshot {
     pub peers: Vec<String>,
     pub log: Vec<String>,
     pub dms: Vec<DmEntry>,
+    pub local_peer_id: String,
 }
 
 #[derive(Clone)]
@@ -24,15 +25,17 @@ pub struct AppState {
     pub peers: Arc<RwLock<HashSet<PeerId>>>,
     pub public_keys: Arc<RwLock<std::collections::HashMap<PeerId, Vec<u8>>>>,
     pub dms: Arc<RwLock<Vec<DmEntry>>>,
+    pub local_peer_id: String,
 }
 
 impl AppState {
-    pub fn new() -> Self {
+    pub fn new(local_peer_id: String) -> Self {
         Self {
             log: Arc::new(RwLock::new(GSet::new())),
             peers: Arc::new(RwLock::new(HashSet::new())),
             public_keys: Arc::new(RwLock::new(std::collections::HashMap::new())),
             dms: Arc::new(RwLock::new(Vec::new())),
+            local_peer_id,
         }
     }
 
@@ -40,7 +43,8 @@ impl AppState {
         let peers = self.peers.read().unwrap().iter().map(|p| p.to_string()).collect();
         let log = self.log.read().unwrap().read().iter().cloned().collect();
         let dms = self.dms.read().unwrap().clone();
+        let local_peer_id = self.local_peer_id.clone();
         
-        AppStateSnapshot { peers, log, dms }
+        AppStateSnapshot { peers, log, dms, local_peer_id }
     }
 }

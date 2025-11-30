@@ -51,7 +51,8 @@ pub async fn run_node(port: u16, id_keys: libp2p::identity::Keypair) -> Result<(
     swarm.behaviour_mut().gossipsub.subscribe(&topic_private)?;
 
     // Initialize App State
-    let app_state = AppState::new();
+    let local_peer_id = swarm.local_peer_id().to_string();
+    let app_state = AppState::new(local_peer_id);
     
     // Load existing log
     if let Ok(loaded_log) = storage::load_log(port) {
