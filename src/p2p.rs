@@ -10,10 +10,11 @@ use std::time::Duration;
 use tokio::io::{self, AsyncBufReadExt};
 use tracing::{info, error};
 use anyhow::Result;
-use crate::state::AppState;
+use crate::state::{AppState, DmEntry};
 use crate::http;
 use crate::ble;
 use crate::storage;
+use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::mpsc;
 use libp2p::identify;
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
@@ -268,7 +269,17 @@ pub async fn run_node(port: u16, id_keys: libp2p::identity::Keypair) -> Result<(
                                     let nonce = Nonce::from_slice(&nonce_bytes);
                                     if let Ok(ciphertext_bytes) = BASE64_STANDARD.decode(&pm.ciphertext) {
                                         if let Ok(plaintext) = cipher.decrypt(nonce, &ciphertext_bytes[..]) {
-                                            info!("*** PRIVATE MESSAGE from {}: {} ***", peer_id, String::from_utf8_lossy(&plaintext));
+                                            let content = String::from_utf8_lossy(&plaintext).to_string();
+                                            info!("*** PRIVATE MESSAGE from {}: {} ***", peer_id, content);
+                                            
+                                            // Store DM
+                                            let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
+                                            let entry = DmEntry {
+                                                from: peer_id.to_string(),
+                                                content,
+                                                timestamp,
+                                            };
+                                            app_state.dms.write().unwrap().push(entry);
                                         } else {
                                             error!("Failed to decrypt message from {}", peer_id);
                                         }

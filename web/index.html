@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -13,6 +14,7 @@
             --accent: #38bdf8;
             --accent-hover: #0ea5e9;
             --border: #334155;
+            --danger: #ef4444;
         }
 
         body {
@@ -80,7 +82,56 @@
             color: var(--text-secondary);
         }
 
-        #log-container {
+        /* Tabs */
+        .tab-container {
+            display: flex;
+            gap: 1rem;
+            margin-bottom: 1rem;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .tab-button {
+            background: none;
+            border: none;
+            color: var(--text-secondary);
+            padding: 0.75rem 1rem;
+            cursor: pointer;
+            font-weight: 600;
+            font-size: 1rem;
+            position: relative;
+        }
+
+        .tab-button.active {
+            color: var(--accent);
+            border-bottom: 2px solid var(--accent);
+        }
+
+        .tab-button:hover {
+            color: var(--text-primary);
+        }
+
+        .badge {
+            background-color: var(--danger);
+            color: white;
+            font-size: 0.75rem;
+            padding: 0.1rem 0.4rem;
+            border-radius: 9999px;
+            position: absolute;
+            top: 0;
+            right: 0;
+            display: none;
+        }
+
+        .tab-content {
+            display: none;
+        }
+
+        .tab-content.active {
+            display: block;
+        }
+
+        #log-container,
+        #dm-container {
             height: 300px;
             overflow-y: auto;
             background-color: #020617;
@@ -96,9 +147,25 @@
             padding-bottom: 0.5rem;
             border-bottom: 1px solid #1e293b;
         }
-        
-        .log-entry:last-child {
-            border-bottom: none;
+
+        .dm-entry {
+            margin-bottom: 0.75rem;
+            padding: 0.75rem;
+            background-color: #1e293b;
+            border-radius: 0.5rem;
+            border-left: 3px solid var(--accent);
+        }
+
+        .dm-header {
+            display: flex;
+            justify-content: space-between;
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+            margin-bottom: 0.25rem;
+        }
+
+        .dm-content {
+            color: var(--text-primary);
         }
 
         .input-group {
@@ -153,6 +220,7 @@
         }
     </style>
 </head>
+
 <body>
     <div class="container">
         <header>
@@ -171,21 +239,81 @@
         </div>
 
         <div class="card">
-            <h2>Shared Log (CRDT)</h2>
-            <div id="log-container"></div>
-            <div class="input-group">
-                <input type="text" id="log-input" placeholder="Type a message to broadcast..." onkeypress="handleKeyPress(event)">
-                <button onclick="sendLog()">Send</button>
+            <div class="tab-container">
+                <button class="tab-button active" onclick="switchTab('global')">Global Log</button>
+                <button class="tab-button" onclick="switchTab('private')">
+                    Private Messages
+                    <span id="dm-badge" class="badge">0</span>
+                </button>
+            </div>
+
+            <div id="tab-global" class="tab-content active">
+                <div id="log-container"></div>
+                <div class="input-group">
+                    <input type="text" id="log-input" placeholder="Type a message to broadcast..."
+                        onkeypress="handleKeyPress(event)">
+                    <button onclick="sendLog()">Send</button>
+                </div>
+            </div>
+
+            <div id="tab-private" class="tab-content">
+                <div id="dm-container">
+                    <span style="color: var(--text-secondary);">No private messages yet.</span>
+                </div>
+                <!-- DM sending from UI is not implemented yet, only viewing -->
             </div>
         </div>
     </div>
 
     <script>
+        let lastDmCount = 0;
+        let currentTab = 'global';
+
+        function switchTab(tab) {
+            currentTab = tab;
+
+            // Update buttons
+            document.querySelectorAll('.tab-button').forEach(btn => btn.classList.remove('active'));
+            event.target.classList.add('active'); // This might be buggy if called programmatically, but works for clicks
+
+            // Update content
+            document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
+            document.getElementById(`tab-${tab}`).classList.add('active');
+
+            // Clear badge if switching to private
+            if (tab === 'private') {
+                const badge = document.getElementById('dm-badge');
+                badge.style.display = 'none';
+                badge.innerText = '0';
+            }
+        }
+
+        // Fix for the event.target issue in switchTab
+        document.querySelectorAll('.tab-button')[0].onclick = function () {
+            document.querySelectorAll('.tab-button').forEach(b => b.classList.remove('active'));
+            this.classList.add('active');
+            document.getElementById('tab-global').classList.add('active');
+            document.getElementById('tab-private').classList.remove('active');
+            currentTab = 'global';
+        };
+        document.querySelectorAll('.tab-button')[1].onclick = function () {
+            document.querySelectorAll('.tab-button').forEach(b => b.classList.remove('active'));
+            this.classList.add('active');
+            document.getElementById('tab-global').classList.remove('active');
+            document.getElementById('tab-private').classList.add('active');
+            currentTab = 'private';
+
+            // Clear badge
+            const badge = document.getElementById('dm-badge');
+            badge.style.display = 'none';
+            badge.innerText = '0';
+        };
+
         async function fetchState() {
             try {
                 const response = await fetch('/api/state');
                 const data = await response.json();
-                
+
                 // Update Peer Count
                 document.getElementById('peer-count').innerText = `${data.peers.length} Peers Connected`;
 
@@ -197,13 +325,42 @@
                     peersContainer.innerHTML = data.peers.map(p => `<div class="peer-tag">${p}</div>`).join('');
                 }
 
-                // Update Log
+                // Update Global Log
                 const logContainer = document.getElementById('log-container');
-                // Sort logs for consistency if needed, or just display as is (Set order is undefined but usually stable in iteration)
-                // For GSet, we just show them.
-                const sortedLogs = data.log.sort(); 
+                const sortedLogs = data.log.sort();
                 logContainer.innerHTML = sortedLogs.map(entry => `<div class="log-entry">${entry}</div>`).join('');
-                
+
+                // Update DMs
+                const dmContainer = document.getElementById('dm-container');
+                if (data.dms && data.dms.length > 0) {
+                    dmContainer.innerHTML = data.dms.map(dm => {
+                        const date = new Date(dm.timestamp * 1000).toLocaleString();
+                        return `
+                            <div class="dm-entry">
+                                <div class="dm-header">
+                                    <span>From: ${dm.from}</span>
+                                    <span>${date}</span>
+                                </div>
+                                <div class="dm-content">${dm.content}</div>
+                            </div>
+                        `;
+                    }).join('');
+                } else {
+                    dmContainer.innerHTML = '<span style="color: var(--text-secondary);">No private messages yet.</span>';
+                }
+
+                // Notifications
+                if (data.dms && data.dms.length > lastDmCount) {
+                    const newCount = data.dms.length - lastDmCount;
+                    if (currentTab !== 'private') {
+                        const badge = document.getElementById('dm-badge');
+                        const currentBadge = parseInt(badge.innerText) || 0;
+                        badge.innerText = currentBadge + newCount;
+                        badge.style.display = 'inline-block';
+                    }
+                }
+                lastDmCount = data.dms ? data.dms.length : 0;
+
             } catch (error) {
                 console.error('Error fetching state:', error);
             }
@@ -221,7 +378,7 @@
                     body: msg
                 });
                 input.value = '';
-                fetchState(); // Refresh immediately
+                fetchState();
             } catch (error) {
                 console.error('Error sending log:', error);
             }
@@ -238,4 +395,5 @@
         fetchState();
     </script>
 </body>
+
 </html>
