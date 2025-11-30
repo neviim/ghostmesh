@@ -539,7 +539,11 @@
         const Graph = ForceGraph()
             (document.getElementById('graph-container'))
             .graphData({ nodes: [], links: [] })
-            .nodeLabel('id')
+            .nodeLabel(node => {
+                const id = node.id;
+                if (!id || id.length < 5) return id;
+                return `#${id.substring(id.length - 5)}`;
+            })
             .nodeRelSize(3) // Smaller nodes (default is 4)
             .nodeColor(node => node.id === localPeerId ? '#38bdf8' : '#22c55e')
             .linkColor(() => '#334155')
