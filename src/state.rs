@@ -3,6 +3,8 @@ use std::sync::{Arc, RwLock};
 use crdts::GSet;
 use libp2p::PeerId;
 use serde::Serialize;
+use tokio::sync::broadcast;
+use crate::telemetry::NetworkEvent;
 
 #[derive(Clone, Serialize, Debug)]
 pub struct DmEntry {
@@ -26,16 +28,19 @@ pub struct AppState {
     pub public_keys: Arc<RwLock<std::collections::HashMap<PeerId, Vec<u8>>>>,
     pub dms: Arc<RwLock<Vec<DmEntry>>>,
     pub local_peer_id: String,
+    pub telemetry_tx: broadcast::Sender<NetworkEvent>,
 }
 
 impl AppState {
     pub fn new(local_peer_id: String) -> Self {
+        let (tx, _rx) = broadcast::channel(100);
         Self {
             log: Arc::new(RwLock::new(GSet::new())),
             peers: Arc::new(RwLock::new(HashSet::new())),
             public_keys: Arc::new(RwLock::new(std::collections::HashMap::new())),
             dms: Arc::new(RwLock::new(Vec::new())),
             local_peer_id,
+            telemetry_tx: tx,
         }
     }
 

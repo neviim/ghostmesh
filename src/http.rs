@@ -3,6 +3,8 @@ use crate::state::AppState;
 use crate::p2p::NodeCommand;
 use tokio::sync::mpsc;
 use std::net::SocketAddr;
+use warp::ws::{Message, WebSocket};
+use futures::{StreamExt, SinkExt};
 
 pub async fn start_server(
     port: u16, 
@@ -60,9 +62,18 @@ pub async fn start_server(
             warp::reply::with_status("Sent", warp::http::StatusCode::OK)
         });
 
+    // WebSocket /ws
+    let ws_route = warp::path("ws")
+        .and(warp::ws())
+        .and(state_filter.clone())
+        .map(|ws: warp::ws::Ws, state: AppState| {
+            ws.on_upgrade(move |socket| handle_ws_connection(socket, state))
+        });
+
     let routes = state_route
         .or(log_route)
         .or(dm_route)
+        .or(ws_route)
         .or(index)
         .or(static_files);
 
@@ -70,4 +81,19 @@ pub async fn start_server(
     println!("Web Dashboard running at http://0.0.0.0:{}", port);
 
     warp::serve(routes).run(addr).await;
+}
+
+async fn handle_ws_connection(ws: WebSocket, state: AppState) {
+    let (mut user_ws_tx, mut _user_ws_rx) = ws.split();
+    let mut rx = state.telemetry_tx.subscribe();
+
+    while let Ok(event) = rx.recv().await {
+        if let Ok(json) = serde_json::to_string(&event) {
+            println!("DEBUG: Sending WS message: {}", json); // Force stdout log
+            if let Err(e) = user_ws_tx.send(Message::text(json)).await {
+                eprintln!("WebSocket send error: {}", e);
+                break;
+            }
+        }
+    }
 }

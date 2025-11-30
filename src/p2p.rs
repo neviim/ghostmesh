@@ -11,6 +11,7 @@ use tokio::io::{self, AsyncBufReadExt};
 use tracing::{info, error};
 use anyhow::Result;
 use crate::state::{AppState, DmEntry};
+use crate::telemetry::NetworkEvent;
 use crate::http;
 use crate::ble;
 use crate::storage;
@@ -205,6 +206,14 @@ pub async fn run_node(port: u16, id_keys: libp2p::identity::Keypair) -> Result<(
                                                     error!("Publish error: {:?}", e);
                                                 } else {
                                                     info!("Sent encrypted DM to {}", target_peer_str);
+                                                    println!("DEBUG: Emitting MessageSent event to {}", target_peer_str);
+                                                    if let Err(e) = app_state.telemetry_tx.send(NetworkEvent::MessageSent { 
+                                                        from: swarm.local_peer_id().to_string(), 
+                                                        to: target_peer_str.to_string(),
+                                                        protocol: "DM".to_string() 
+                                                    }) {
+                                                        eprintln!("DEBUG: Failed to emit MessageSent: {}", e);
+                                                    }
                                                 }
                                             }
                                         } else {
@@ -258,11 +267,15 @@ pub async fn run_node(port: u16, id_keys: libp2p::identity::Keypair) -> Result<(
                     info!("Connection established with peer: {peer_id}");
                     app_state.peers.write().unwrap().insert(peer_id);
                     pending_dials.remove(&peer_id);
+                    
+                    let _ = app_state.telemetry_tx.send(NetworkEvent::PeerConnected { peer_id: peer_id.to_string() });
                 }
                 SwarmEvent::ConnectionClosed { peer_id, cause, .. } => {
                     info!("Connection closed with peer: {peer_id}. Cause: {cause:?}");
                     app_state.peers.write().unwrap().remove(&peer_id);
                     pending_dials.remove(&peer_id);
+
+                    let _ = app_state.telemetry_tx.send(NetworkEvent::PeerDisconnected { peer_id: peer_id.to_string() });
                 }
                 SwarmEvent::OutgoingConnectionError { peer_id, error, .. } => {
                     info!("Outgoing connection error with peer {:?}: {error:?}", peer_id);
@@ -322,6 +335,15 @@ pub async fn run_node(port: u16, id_keys: libp2p::identity::Keypair) -> Result<(
                                                 timestamp,
                                             };
                                             app_state.dms.write().unwrap().push(entry);
+                                            
+                                            println!("DEBUG: Emitting MessageReceived event for {}", peer_id);
+                                            if let Err(e) = app_state.telemetry_tx.send(NetworkEvent::MessageReceived { 
+                                                from: peer_id.to_string(), 
+                                                to: local_id,
+                                                protocol: "DM".to_string() 
+                                            }) {
+                                                eprintln!("DEBUG: Failed to emit MessageReceived: {}", e);
+                                            }
                                         } else {
                                             error!("Failed to decrypt message from {}", peer_id);
                                         }

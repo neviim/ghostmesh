@@ -3,6 +3,7 @@ mod state;
 mod http;
 mod ble;
 mod storage;
+mod telemetry;
 
 use clap::Parser;
 use tracing_subscriber::EnvFilter;

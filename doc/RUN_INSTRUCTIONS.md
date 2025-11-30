@@ -69,3 +69,25 @@ Exemplo:
 ```bash
 /log Olá via Terminal!
 ```
+
+## 5. Verificando a Observabilidade (War Room)
+
+O GhostMesh possui um sistema de visualização em tempo real da topologia da rede.
+
+### 1. Visualização do Grafo
+1.  Abra o Dashboard.
+2.  Clique na aba **"War Room"**.
+3.  Você verá um grafo interativo onde:
+    *   **Nó Azul:** É você.
+    *   **Nós Verdes:** São os peers conectados.
+    *   **Linhas:** Representam as conexões ativas.
+
+### 2. Eventos em Tempo Real (Partículas)
+Para ver o fluxo de dados acontecendo:
+
+1.  Mantenha a aba **"War Room"** aberta em uma janela.
+2.  Abra uma **segunda janela** do navegador (pode ser o mesmo dashboard ou de outro nó).
+3.  Nessa segunda janela, vá em **"Private Messages"**.
+4.  Envie uma mensagem para um peer.
+5.  Olhe imediatamente para a janela da **"War Room"**.
+6.  Você verá uma **partícula de luz** viajando pela linha de conexão, indicando que a mensagem foi trafegada com sucesso! ⚡️
