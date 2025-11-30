@@ -282,6 +282,7 @@
 
     <script>
         let lastDmCount = 0;
+        let isFirstLoad = true;
         let currentTab = 'global';
 
         function shortenId(id) {
@@ -388,7 +389,11 @@
                 }
 
                 // Notifications
-                if (data.dms && data.dms.length > lastDmCount) {
+                // Notifications
+                if (isFirstLoad) {
+                    lastDmCount = data.dms ? data.dms.length : 0;
+                    isFirstLoad = false;
+                } else if (data.dms && data.dms.length > lastDmCount) {
                     const newCount = data.dms.length - lastDmCount;
                     if (currentTab !== 'private') {
                         const badge = document.getElementById('dm-badge');
@@ -396,8 +401,10 @@
                         badge.innerText = currentBadge + newCount;
                         badge.style.display = 'inline-block';
                     }
+                    lastDmCount = data.dms.length;
+                } else {
+                    lastDmCount = data.dms ? data.dms.length : 0;
                 }
-                lastDmCount = data.dms ? data.dms.length : 0;
 
             } catch (error) {
                 console.error('Error fetching state:', error);
