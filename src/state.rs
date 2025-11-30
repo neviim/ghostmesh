@@ -14,6 +14,7 @@ pub struct AppStateSnapshot {
 pub struct AppState {
     pub log: Arc<RwLock<GSet<String>>>,
     pub peers: Arc<RwLock<HashSet<PeerId>>>,
+    pub public_keys: Arc<RwLock<std::collections::HashMap<PeerId, Vec<u8>>>>,
 }
 
 impl AppState {
@@ -21,6 +22,7 @@ impl AppState {
         Self {
             log: Arc::new(RwLock::new(GSet::new())),
             peers: Arc::new(RwLock::new(HashSet::new())),
+            public_keys: Arc::new(RwLock::new(std::collections::HashMap::new())),
         }
     }
 
