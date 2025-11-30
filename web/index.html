@@ -265,7 +265,17 @@
                 <div id="dm-container">
                     <span style="color: var(--text-secondary);">No private messages yet.</span>
                 </div>
-                <!-- DM sending from UI is not implemented yet, only viewing -->
+
+                <div class="input-group"
+                    style="margin-top: 1rem; border-top: 1px solid var(--border); padding-top: 1rem;">
+                    <select id="dm-peer-select"
+                        style="background-color: #020617; border: 1px solid var(--border); color: var(--text-primary); padding: 0.75rem; border-radius: 0.5rem; outline: none; min-width: 150px; flex-shrink: 0;">
+                        <option value="">Select Peer...</option>
+                    </select>
+                    <input type="text" id="dm-input" placeholder="Type a private message..."
+                        onkeypress="handleDmKeyPress(event)">
+                    <button onclick="sendDm()">Send DM</button>
+                </div>
             </div>
         </div>
     </div>
@@ -273,6 +283,11 @@
     <script>
         let lastDmCount = 0;
         let currentTab = 'global';
+
+        function shortenId(id) {
+            if (!id || id.length < 10) return id;
+            return `${id.substring(0, 5)}...${id.substring(id.length - 5)}`;
+        }
 
         function switchTab(tab) {
             currentTab = tab;
@@ -321,7 +336,7 @@
 
                 // Update Local Peer ID
                 if (data.local_peer_id) {
-                    document.getElementById('local-peer-id').innerText = `ID: ${data.local_peer_id}`;
+                    document.getElementById('local-peer-id').innerText = `ID: ${shortenId(data.local_peer_id)}`;
                 }
 
                 // Update Peer Count
@@ -333,6 +348,19 @@
                     peersContainer.innerHTML = '<span style="color: var(--text-secondary);">Waiting for connections...</span>';
                 } else {
                     peersContainer.innerHTML = data.peers.map(p => `<div class="peer-tag">${p}</div>`).join('');
+                }
+
+                // Update DM Peer Select (only if not focused to avoid interrupting user)
+                const dmSelect = document.getElementById('dm-peer-select');
+                if (document.activeElement !== dmSelect) {
+                    const currentVal = dmSelect.value;
+                    let options = '<option value="">Select Peer...</option>';
+                    data.peers.forEach(p => {
+                        const alias = shortenId(p);
+                        options += `<option value="${p}" ${p === currentVal ? 'selected' : ''}>${alias}</option>`;
+                    });
+                    dmSelect.innerHTML = options;
+                    dmSelect.value = currentVal; // Restore selection
                 }
 
                 // Update Global Log
@@ -394,9 +422,40 @@
             }
         }
 
+        async function sendDm() {
+            const select = document.getElementById('dm-peer-select');
+            const input = document.getElementById('dm-input');
+            const to = select.value;
+            const content = input.value.trim();
+
+            if (!to || !content) {
+                alert("Please select a peer and type a message.");
+                return;
+            }
+
+            try {
+                await fetch('/api/dm', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ to, content })
+                });
+                input.value = '';
+                alert("DM Sent!");
+            } catch (error) {
+                console.error('Error sending DM:', error);
+                alert("Failed to send DM.");
+            }
+        }
+
         function handleKeyPress(event) {
             if (event.key === 'Enter') {
                 sendLog();
+            }
+        }
+
+        function handleDmKeyPress(event) {
+            if (event.key === 'Enter') {
+                sendDm();
             }
         }
 

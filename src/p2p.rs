@@ -29,6 +29,12 @@ struct PrivateMessage {
     nonce: String, // Base64 encoded
 }
 
+#[derive(Debug)]
+pub enum NodeCommand {
+    Log(String),
+    SendDm { to: String, content: String },
+}
+
 // We create a custom network behaviour that combines Gossipsub and Mdns.
 #[derive(NetworkBehaviour)]
 pub struct MyBehaviour {
@@ -63,7 +69,7 @@ pub async fn run_node(port: u16, id_keys: libp2p::identity::Keypair) -> Result<(
     let mut pending_dials: HashSet<PeerId> = HashSet::new();
 
     // Channel for Web -> P2P communication
-    let (log_tx, mut log_rx) = mpsc::unbounded_channel();
+    let (log_tx, mut log_rx) = mpsc::unbounded_channel::<NodeCommand>();
 
     // Spawn Web Server
     let web_state = app_state.clone();
@@ -88,17 +94,52 @@ pub async fn run_node(port: u16, id_keys: libp2p::identity::Keypair) -> Result<(
     loop {
         tokio::select! {
             // Handle Web Input (Log)
-            Some(msg) = log_rx.recv() => {
-                app_state.log.write().unwrap().insert(msg.clone());
-                info!("Web Logged: {}", msg);
-                if let Err(e) = storage::save_log(port, &*app_state.log.read().unwrap()) {
-                    error!("Failed to save log: {:?}", e);
-                }
-                
-                // Broadcast new state
-                let state_bytes = serde_json::to_vec(&*app_state.log.read().unwrap())?;
-                if let Err(e) = swarm.behaviour_mut().gossipsub.publish(topic_crdt.clone(), state_bytes) {
-                    error!("Publish error: {:?}", e);
+            Some(cmd) = log_rx.recv() => {
+                match cmd {
+                    NodeCommand::Log(msg) => {
+                        app_state.log.write().unwrap().insert(msg.clone());
+                        info!("Web Logged: {}", msg);
+                        if let Err(e) = storage::save_log(port, &*app_state.log.read().unwrap()) {
+                            error!("Failed to save log: {:?}", e);
+                        }
+                        
+                        // Broadcast new state
+                        let state_bytes = serde_json::to_vec(&*app_state.log.read().unwrap())?;
+                        if let Err(e) = swarm.behaviour_mut().gossipsub.publish(topic_crdt.clone(), state_bytes) {
+                            error!("Publish error: {:?}", e);
+                        }
+                    }
+                    NodeCommand::SendDm { to, content } => {
+                        // Logic reused from /dm command
+                         if let Ok(target_peer_id) = to.parse::<PeerId>() {
+                            let public_keys = app_state.public_keys.read().unwrap();
+                            if let Some(_pub_key_bytes) = public_keys.get(&target_peer_id) {
+                                let key = Key::from_slice(b"an example very very secret key.");
+                                let cipher = ChaCha20Poly1305::new(key);
+                                let nonce = Nonce::from_slice(b"unique nonce");
+                                
+                                if let Ok(ciphertext) = cipher.encrypt(nonce, content.as_bytes()) {
+                                    let payload = PrivateMessage {
+                                        to: to.clone(),
+                                        ciphertext: BASE64_STANDARD.encode(ciphertext),
+                                        nonce: BASE64_STANDARD.encode(nonce),
+                                    };
+                                    
+                                    if let Ok(json) = serde_json::to_vec(&payload) {
+                                        if let Err(e) = swarm.behaviour_mut().gossipsub.publish(topic_private.clone(), json) {
+                                            error!("Publish error: {:?}", e);
+                                        } else {
+                                            info!("Web Sent encrypted DM to {}", to);
+                                        }
+                                    }
+                                }
+                            } else {
+                                error!("Public Key for {} not found.", to);
+                            }
+                        } else {
+                            error!("Invalid Peer ID: {}", to);
+                        }
+                    }
                 }
             }
             // Handle Stdin Input
